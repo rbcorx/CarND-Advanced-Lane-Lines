@@ -5,6 +5,7 @@ import glob
 
 
 def get_calib_coef(objpts, imgpts, shape):
+    """returns caliberations coefficients"""
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpts, imgpts, shape, None, None)
     return (ret, mtx, dist)
 
@@ -14,7 +15,8 @@ def grayscale(image):
 
 
 def get_calib_pts(images, size=(9, 6)):
-    """images must be array of filenames"""
+    """extracts caliberation params from images (objpts, imgpts, shape)
+    images must be array of filenames"""
     imgpts = []
     objpts = []
     objpts_img = np.zeros((size[0] * size[1], 3), np.float32)
@@ -23,7 +25,7 @@ def get_calib_pts(images, size=(9, 6)):
         image = mtpimg.imread(image_name)
         gray = grayscale(image)
         ret, corners = cv2.findChessboardCorners(gray, size, None)
-        if ret == True:
+        if ret is True:
             imgpts.append(corners)
             objpts.append(objpts_img)
     shape = (image.shape[1], image.shape[0])
@@ -31,10 +33,13 @@ def get_calib_pts(images, size=(9, 6)):
 
 
 def get_undistorter():
+    """returns the undistorter as a function after performing caliberation with the provided images"""
     images = glob.glob("camera_cal/calibration*.jpg")
     ret, mtx, dist = get_calib_coef(*get_calib_pts(images))
+
     def undistort(image):
         return cv2.undistort(image, mtx, dist, None, mtx)
+
     return undistort
 
 

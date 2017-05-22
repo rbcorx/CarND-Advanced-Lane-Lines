@@ -13,6 +13,7 @@ right_prev = []
 
 
 def averager(left_fit, right_fit, add=None):
+    """averages detections over last N frames to reduce jitter and increase stability"""
     global left_prev, right_prev
     if len(left_prev) >= navg:
         left_prev = left_prev[1:]
@@ -29,20 +30,24 @@ def averager(left_fit, right_fit, add=None):
 
 
 def sanity_checks(left_fit, right_fit, recover=False, use_avg=False):
+    """checks for deviation of fit coefficients from previously found lane lines to ascertain high confidence detection
+            within defined tolerance levels
+
+    This results in a remarkable boost in stability and robustness of lane lines detected
+        as we get to know when we don't have a good result and that way we can switch blind lane searching
+        or reuse previous detections
+
+    """
     # calculated values make sese or do blind search
     # copy previous values if even blind search doesn't yeild satisfactory results
-
     # constant value makes sense, in the ballpark of distance estimated previously
-
     # constant values don't drastically change at once
 
     alpha = (30, 30, 0.5)  # 3000%, 3000%, 50% tolerence to change
 
     is_sane = True
-    # print (len(left_prev))
+
     if len(left_prev) == navg:
-
-
         # taking last elem for checks
         mean_l = left_prev[-1]
         mean_r = right_prev[-1]
@@ -53,10 +58,6 @@ def sanity_checks(left_fit, right_fit, recover=False, use_avg=False):
             mean_r = np.mean(right_prev, axis=0)
 
         for mean, fit in ((mean_l, left_fit), (mean_r, right_fit)):
-            # print("sanity checks GO! ::")
-            # print (mean)
-            # print (fit)
-            # print (list(map(lambda x: abs(x[0] - x[1]) / abs(x[0]) < x[2], zip(mean, fit, alpha))))
             is_sane = is_sane and all(list(map(lambda x: abs(x[0] - x[1]) / abs(x[0]) < x[2], zip(mean, fit, alpha))))
 
     if recover and (not is_sane):
@@ -115,6 +116,7 @@ def radius_and_dist(warped, left_fit, right_fit):
 
 
 def blind_lane_search(binary_warped):
+    """does a lane search from scratch"""
     # Assuming you have created a warped binary image called "binary_warped"
     # Take a histogram of the bottom half of the image
     histogram = np.sum(binary_warped[binary_warped.shape[0]//2:,:], axis=0)
@@ -187,15 +189,14 @@ def blind_lane_search(binary_warped):
 
     # Generate x and y values for plotting
 
-
     out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
     out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
-    # import ipdb
-    # ipdb.set_trace()
+
     return (left_fit, right_fit)
 
 
 def targeted_lane_search(left_fit, right_fit, binary_warped):
+    """does a targeted lane search by using the previously found lanes"""
     # Assume you now have a new warped binary image
     # from the next frame of video (also called "binary_warped")
     # It's now much easier to find line pixels!
@@ -218,12 +219,6 @@ def targeted_lane_search(left_fit, right_fit, binary_warped):
     rightx = nonzerox[right_lane_inds]
     righty = nonzeroy[right_lane_inds]
 
-    # import ipdb
-    # ipdb.set_trace()
-    # print("debug outputLLL@@@@")
-    # print(lefty.shape)
-    # print(leftx.shape)
-
     # Fit a second order polynomial to each
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
@@ -236,6 +231,10 @@ def targeted_lane_search(left_fit, right_fit, binary_warped):
 
 
 def process(binary_warped):
+    """processes a warped binary to find the lane lines
+    auto picks targeted lane search if possible, else blind lane search from scratch
+    Performs sanity checks and averaging over last N frames
+    """
     global left_fit, right_fit
     add_history = None
     sanity_retained = True
@@ -243,17 +242,11 @@ def process(binary_warped):
         try:
             (left_fit_new, right_fit_new) = targeted_lane_search(left_fit, right_fit, binary_warped)
             if not sanity_checks(left_fit_new, right_fit_new):
-                # print("this is insane TARGETED!!!!! $$##")
                 sanity_retained = False
                 # TODO BETA
                 # (left_fit_new, right_fit_new) = blind_lane_search(binary_warped)
-
-            # TODO handle errors more gracefully
         except:
             sanity_retained = False
-            # print("this is insane EXCEPTION!!!!! $$##")
-            # import ipdb
-            # ipdb.set_trace()
     else:
         sanity_retained = False
 
@@ -267,11 +260,7 @@ def process(binary_warped):
         res = sanity_checks(left_fit_new, right_fit_new, recover=True)
         if res is not True:
             sanity_retained = False
-            # add_history = (left_fit_new, right_fit_new)
-            # print("this is insane BLIND!!!!! $$##")
             (left_fit_new, right_fit_new) = res
-    # import ipdb
-    # ipdb.set_trace()
     (left_fit_new, right_fit_new) = averager(left_fit_new, right_fit_new, add_history)
 
     left_fit = left_fit_new
@@ -283,6 +272,7 @@ def process(binary_warped):
 
 
 def draw_lines(warped, image, left_fit, right_fit, pers_transform):
+    """draws lane lines on the image"""
     ploty = np.linspace(0, warped.shape[0] - 1, warped.shape[0])
     left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
     right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
@@ -301,7 +291,6 @@ def draw_lines(warped, image, left_fit, right_fit, pers_transform):
     # ipdb.set_trace()
     cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
 
-
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
     newwarp = pers_transform(color_warp, True)
     # Combine the result with the original image
@@ -309,6 +298,7 @@ def draw_lines(warped, image, left_fit, right_fit, pers_transform):
 
 
 def put_text(img, measures):
+    """displays text for ROC and distance on image"""
     text = "ROC: {:.3f}, distance: {:.3f}".format(*measures)
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(img, text, (10, 50), font, 1, (255, 255, 255), 2)
