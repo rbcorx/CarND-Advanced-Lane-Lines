@@ -8,6 +8,7 @@ import glob
 
 # binary filter methods
 
+from pipeline import put_text
 
 def norm(s):
     return 255 * np.absolute(s) / np.max(s)
@@ -139,21 +140,26 @@ from undistort import get_undistorter
 from visualize import draw_images as di
 
 
-undistorter = lambda x: x  # get_undistorter()
+undistorter = get_undistorter() # lambda x: x  #
 
 
-def test_images(bug=True):
+def test_images(bug=False):
     folder = "bugs" if bug else "test_images"
-    images = glob.glob("{}/bug_img_2.jpg".format(folder))
+    images = glob.glob("{}/*.jpg".format(folder))  # bug_img_2
 
     ori_images = [undistorter(mpimg.imread(image)) for image in images]
 
     count = 0
     imgs = []
     for fimg in images:
+        image = mpimg.imread(fimg)
+        img = undistorter(image)
+        image = np.copy(img)
 
-        img = undistorter(mpimg.imread(fimg))
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+        # gaussian blur
+        img = cv2.GaussianBlur(img, (5, 5), 0)
 
         #img = pers_transform(img)
 
@@ -182,7 +188,7 @@ def test_images(bug=True):
 
         hls_thresh = get_hls_thresh(img, h_thresh_white_2, s_thresh_white_2)
 
-        # hls_thresh = alt_combine(get_hls_thresh(img, h_thresh_white, s_thresh_white), get_hls_thresh(img, h_thresh_white_2, s_thresh_white_2), do_or=True)
+        hls_thresh = alt_combine(get_hls_thresh(img, h_thresh_white, s_thresh_white), get_hls_thresh(img, h_thresh_white_2, s_thresh_white_2), do_or=True)
         # hls_thresh = alt_combine(alt_combine(get_hls_thresh(img, h_thresh_white_2, s_thresh_white_2), get_hls_thresh(img, s_thresh=s_thresh_white)),
         #                          get_hls_thresh(img, h_thresh_white))
 
@@ -212,7 +218,11 @@ def test_images(bug=True):
         # TODO remove mask for tough curves
         # ans = mask(ans)
 
-        imgs.append(ans)
+        # drawing lines
+        (left_fit, right_fit, measures) = process(ans)
+        image = draw_lines(ans, image, left_fit, right_fit, pers_transform)
+        put_text(image, measures)
+        imgs.append(image)  # append(ans)
 
         #plot = plt.imshow(ans, cmap="gray")
     di(imgs)
@@ -249,7 +259,7 @@ from pipeline import process, display_lines, draw_lines
 
 
 # for i in range(len(imgs)):
-#     (left_fit, right_fit) = process(imgs[i])
+#     (left_fit, right_fit, measures) = process(imgs[i])
 #     ori_images[i] = draw_lines(imgs[i], ori_images[i], left_fit, right_fit, pers_transform)
 
 # di(ori_images)
@@ -286,13 +296,16 @@ def write_clip(input_file, output_file, function):
 count = 0
 
 
-def process_frame(image, debug=True):
+def process_frame(image, debug=False):
 
 
     copy = np.copy(image)
     copy = undistorter(copy)
 
     gray = cv2.cvtColor(copy, cv2.COLOR_RGB2GRAY)
+
+    # gaussian blur
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
 
     abs_args = (gray, 35, 120, 15, 40)  # (img, 35, 120, 30, 40)
     mag_args = (gray, 10, 255, 9)  # (img, 10, 200, 9)
@@ -321,16 +334,17 @@ def process_frame(image, debug=True):
         count += 1
         ans = pers_transform(ans)
         # image[(ans == 1), :] = 0
-        # image = np.dstack((ans, ans, ans))
+        # image = np.dstack((ans, ans, ans)) gi
         # image[(ans == 1), :] = 255
         if count >= 40:
-            plt.imshow(ans)
-            plt.show()
-            import ipdb
-            ipdb.set_trace()
+            pass
+            # plt.imshow(ans)
+            # plt.show()
+            # import ipdb
+            # ipdb.set_trace()
     else:
         ans = pers_transform(ans)
-        (left_fit, right_fit) = process(ans)
+        (left_fit, right_fit, measures) = process(ans)
         image = draw_lines(ans, image, left_fit, right_fit, pers_transform)
 
     return image
@@ -340,8 +354,13 @@ def test():
     vinp = 'project_video.mp4'
     vout = 'project_video_solution.mp4'
 
-    vinp = "project_video_error_short.mp4"
-    vout = "project_video_error_solution_test.mp4"
+    # vinp = "project_video_error_short.mp4"
+    # vout = "project_video_error_solution_test.mp4"
+
+
+    # CHALLENGE video
+    # vinp = 'challenge_video.mp4'
+    # vout = 'challenge_video_solution.mp4'
 
     write_clip(vinp, vout, process_frame)
 
@@ -382,5 +401,6 @@ def test():
 
 if __name__ == "__main__":
     # pass
+    # test()
     test_images()
 

@@ -7,7 +7,111 @@ left_fit = None
 right_fit = None
 
 
+navg = 10
+left_prev = []
+right_prev = []
 
+
+def averager(left_fit, right_fit, add=None):
+    global left_prev, right_prev
+    if len(left_prev) >= navg:
+        left_prev = left_prev[1:]
+        right_prev = right_prev[1:]
+
+    if add is None:
+        left_prev.append(left_fit)
+        right_prev.append(right_fit)
+    else:
+        left_prev.append(add[0])
+        right_prev.append(add[1])
+
+    return (np.mean(left_prev, axis=0), np.mean(right_prev, axis=0))
+
+
+def sanity_checks(left_fit, right_fit, recover=False, use_avg=False):
+    # calculated values make sese or do blind search
+    # copy previous values if even blind search doesn't yeild satisfactory results
+
+    # constant value makes sense, in the ballpark of distance estimated previously
+
+    # constant values don't drastically change at once
+
+    alpha = (30, 30, 0.5)  # 3000%, 3000%, 50% tolerence to change
+
+    is_sane = True
+    # print (len(left_prev))
+    if len(left_prev) == navg:
+
+
+        # taking last elem for checks
+        mean_l = left_prev[-1]
+        mean_r = right_prev[-1]
+
+        if use_avg:
+            # taking mean instead of last elem
+            mean_l = np.mean(left_prev, axis=0)
+            mean_r = np.mean(right_prev, axis=0)
+
+        for mean, fit in ((mean_l, left_fit), (mean_r, right_fit)):
+            # print("sanity checks GO! ::")
+            # print (mean)
+            # print (fit)
+            # print (list(map(lambda x: abs(x[0] - x[1]) / abs(x[0]) < x[2], zip(mean, fit, alpha))))
+            is_sane = is_sane and all(list(map(lambda x: abs(x[0] - x[1]) / abs(x[0]) < x[2], zip(mean, fit, alpha))))
+
+    if recover and (not is_sane):
+        return (mean_l, mean_r)
+
+    return is_sane
+
+
+def radius_and_dist(warped, left_fit, right_fit):
+    """calculates radius of curvature and distance of car from center"""
+    norm = 1000
+
+    ploty = np.linspace(0, warped.shape[0] - 1, warped.shape[0])
+
+    leftx = np.array([(y ** 2) * left_fit[0] + y * left_fit[1] + left_fit[2]
+                      for y in ploty])
+    rightx = np.array([(y ** 2) * right_fit[0] + y * right_fit[1] + right_fit[2]
+                      for y in ploty])
+
+    y_eval = np.max(ploty)
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = 30 / 720  # meters per pixel in y dimension
+    xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
+
+    # Fit new polynomials to x, y in world space
+    left_fit_cr = np.polyfit(ploty * ym_per_pix, leftx *
+                             xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty * ym_per_pix, rightx * xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval *
+                           ym_per_pix + left_fit_cr[1]) ** 2) **
+                     1.5) / np.absolute(2 * left_fit_cr[0])
+    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix +
+                            right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit_cr[0])
+    # Now our radius of curvature is in meters
+
+    # radius = [left_curverad, right_curverad]
+    # print(left_curverad, 'm', right_curverad, 'm')
+
+    lx = ((y_eval * ym_per_pix / 2) ** 2) * left_fit_cr[0] + (y_eval * ym_per_pix / 2) * left_fit_cr[1] + left_fit_cr[2]
+    rx = ((y_eval * ym_per_pix / 2) ** 2) * right_fit_cr[0] + (y_eval * ym_per_pix / 2) * right_fit_cr[1] + right_fit_cr[2]
+
+    center_mid_x = (lx + rx) / 2 / xm_per_pix
+
+    img_center_x, img_center_y = warped.shape[1] / 2, warped.shape[0] / 2
+
+    dist = np.sqrt(((img_center_y - y_eval / 2) * ym_per_pix) ** 2 +
+                   ((img_center_x - center_mid_x) * xm_per_pix) ** 2)
+
+    # print ("distance from center : {}".format(dist))
+
+    radius = left_curverad if abs(norm - left_curverad) < abs(norm - right_curverad) else right_curverad
+    # print (radius, "m : radius found")
+
+    return (radius, dist)
 
 
 def blind_lane_search(binary_warped):
@@ -79,7 +183,6 @@ def blind_lane_search(binary_warped):
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
 
-
     # visualization
 
     # Generate x and y values for plotting
@@ -134,22 +237,49 @@ def targeted_lane_search(left_fit, right_fit, binary_warped):
 
 def process(binary_warped):
     global left_fit, right_fit
+    add_history = None
+    sanity_retained = True
     if left_fit is not None:
         try:
             (left_fit_new, right_fit_new) = targeted_lane_search(left_fit, right_fit, binary_warped)
+            if not sanity_checks(left_fit_new, right_fit_new):
+                # print("this is insane TARGETED!!!!! $$##")
+                sanity_retained = False
+                # TODO BETA
+                # (left_fit_new, right_fit_new) = blind_lane_search(binary_warped)
+
             # TODO handle errors more gracefully
         except:
-            import ipdb
-            ipdb.set_trace()
-            (left_fit_new, right_fit_new) = blind_lane_search(binary_warped)
-
+            sanity_retained = False
+            # print("this is insane EXCEPTION!!!!! $$##")
+            # import ipdb
+            # ipdb.set_trace()
     else:
-        (left_fit_new, right_fit_new) = blind_lane_search(binary_warped)
+        sanity_retained = False
+
+    if not sanity_retained:
+        sanity_retained = True
+        try:
+            (left_fit_new, right_fit_new) = blind_lane_search(binary_warped)
+        except:
+            (left_fit_new, right_fit_new) = (left_fit, right_fit)
+
+        res = sanity_checks(left_fit_new, right_fit_new, recover=True)
+        if res is not True:
+            sanity_retained = False
+            # add_history = (left_fit_new, right_fit_new)
+            # print("this is insane BLIND!!!!! $$##")
+            (left_fit_new, right_fit_new) = res
+    # import ipdb
+    # ipdb.set_trace()
+    (left_fit_new, right_fit_new) = averager(left_fit_new, right_fit_new, add_history)
 
     left_fit = left_fit_new
     right_fit = right_fit_new
 
-    return (left_fit, right_fit)
+    measures = radius_and_dist(binary_warped, left_fit, right_fit)
+
+    return (left_fit, right_fit, measures)
 
 
 def draw_lines(warped, image, left_fit, right_fit, pers_transform):
@@ -176,6 +306,12 @@ def draw_lines(warped, image, left_fit, right_fit, pers_transform):
     newwarp = pers_transform(color_warp, True)
     # Combine the result with the original image
     return cv2.addWeighted(image, 1, newwarp, 0.3, 0)
+
+
+def put_text(img, measures):
+    text = "ROC: {:.3f}, distance: {:.3f}".format(*measures)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(img, text, (10, 50), font, 1, (255, 255, 255), 2)
 
 
 # globals
